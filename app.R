@@ -1,3 +1,8 @@
+#Improvements:
+#Higher level categories? i.e. all the 1's from IPCC?
+#Get rid of unnecessary categories i.e. if all of subcategory is one gas
+#Make labels clearer, i.e. simplify colons and codes
+
 library(magrittr)
 
 raw_inventoryData <- readxl::read_xlsx("Copy of 230511 AO10753PB_NetZeroInventoryMapping_2021Update_unamended_.xlsx",
