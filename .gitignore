@@ -2,10 +2,9 @@
 .Rhistory
 .RData
 .Ruserdata
-<<<<<<< HEAD
+
 *.xlsx
 *.Rproj
 rsconnect/
-=======
-.xlsx
->>>>>>> 365a650ef064c97588d36d393098b874803ea888
+
+
