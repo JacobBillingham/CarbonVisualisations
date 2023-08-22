@@ -27,6 +27,15 @@ inventoryData <- raw_inventoryData[,1:12] %>%
   dplyr::mutate(dplyr::across(x2017:x2021, ~tidyr::replace_na(.x, 0))) %>% #replace NAs with zero
   tidyr::pivot_longer(x2017:x2021, names_to = "year", values_to = "emissions") %>%
   dplyr::mutate(year = as.numeric(gsub("x","", year))) %>%
+  dplyr::mutate(sector = substr(ippcId, 1, 1), .before = ippcId) %>%
+  dplyr::mutate(sector = dplyr::case_when(sector == 1 ~ "Energy",
+                                          sector == 2 ~ "Industrial Processes",
+                                          sector == 3 ~ "Agriculture",
+                                          sector == 4 ~ "LULUCF",
+                                          sector == 5 ~ "Waste",
+                                          TRUE ~ NA)) 
+
+ inventoryData %<>%
   dplyr::mutate(activityName = paste0(ippcId, ": ", activityName)) %>%
   dplyr::mutate(gasType = paste0(activityName, ": ", gasType))
 
@@ -56,26 +65,43 @@ server <- function(input, output, session) {
   
   producePlot <- shiny::reactive({
   
-    groupedInventoryData <- inventoryData %>%
+    #this method of getting the child parent pairs is terrible - rethink
+    
+    plotData <- inventoryData %>%
       dplyr::filter(year == input$selectedYear) %>%
-      dplyr::group_by(ippcId, activityName, gasType) %>% #removed sourcename for now as has many categories
+      dplyr::group_by(sector, ippcId, activityName, gasType) %>% #removed sourcename for now as has many categories
       dplyr::summarise(emissionTotal = sum(emissions), .groups = "drop_last") %>%
-      dplyr::filter(emissionTotal >0) #currently just remove negative emissions, could plot these in a second plot?
+      dplyr::filter(emissionTotal >= 0) %>% #currently just remove negative emissions, could plot these in a second plot?
+      tibble::rownames_to_column() %>%
+      tidyr::pivot_longer(sector:gasType, names_to = "labels", values_to = "values") %>%
+      dplyr::mutate(labels = dplyr::case_when(labels == "sector" ~ 1,
+                                              labels == "ippcId" ~ 2,
+                                              labels == "activityName" ~ 3,
+                                              labels == "gasType" ~ 4,
+                                              TRUE ~ NA)) 
     
-    groups <- groupedInventoryData %>% dplyr::group_by(ippcId) %>%
-      dplyr::summarise(values = sum(emissionTotal), .groups = "drop_last") %>%
-      dplyr::rename(labels = ippcId) %>%
-      dplyr::mutate(parents = "")
+    plotData$parents <- ""
     
-    subgroups <- groupedInventoryData %>% dplyr::group_by(ippcId, activityName) %>%
-      dplyr::summarise(values = sum(emissionTotal), .groups = "drop_last") %>%
-      dplyr::rename(parents = ippcId, labels = activityName)
+    plotData1 <- dplyr::filter(plotData, labels == "1")
+    plotData2 <- dplyr::filter(plotData, labels != "1")
     
-    plotData <- groupedInventoryData %>% 
-      dplyr::select(-ippcId) %>%
-      dplyr::rename(parents = activityName, labels = gasType, values = emissionTotal) %>%
-      rbind(groups) %>%
-      rbind(subgroups)
+    for(i in 1:nrow(plotData2)){
+    
+    plotData2$parents[i] <- plotData$values[plotData$rowname == plotData2$rowname[i] & plotData$labels == plotData2$labels[i]-1]
+    
+    }
+    
+    plotData <- rbind(plotData1, plotData2)
+    
+    plotData %<>% dplyr::select(-rowname, -labels) %>%
+      dplyr::rename(labels = values, values = emissionTotal) %>%
+      dplyr::group_by(labels, parents) %>%
+      dplyr::summarise(values=sum(values), .groups = "drop_last") %>%
+      dplyr::mutate(color = dplyr::case_when(labels == "Energy" ~ "red",
+                                             labels == "Industrial Processes" ~ "yellow",
+                                             labels == "Agriculture" ~ "green",
+                                             labels == "LULUCF" ~ "blue",
+                                             labels == "Waste" ~ "purple"))
     
     plotly::plot_ly(
       type='treemap',
@@ -83,8 +109,10 @@ server <- function(input, output, session) {
       parents=plotData$parents,
       values= plotData$values,
       branchvalues = "total",
-      height=800
+      height=800,
+      marker=list(colors=plotData$color)
     )
+    
     
     })
   
