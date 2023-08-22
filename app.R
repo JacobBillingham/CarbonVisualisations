@@ -2,6 +2,7 @@
 #Higher level categories? i.e. all the 1's from IPCC?
 #Get rid of unnecessary categories i.e. if all of subcategory is one gas
 #Make labels clearer, i.e. simplify colons and codes
+#Tickboxes to allow selecting multiple years
 
 library(magrittr)
 
@@ -38,7 +39,9 @@ ui <- shiny::fluidPage(
       "selectedYear",
       "Choose year:",
       selected = 2021,
-      years)
+      years),
+    
+    shiny::htmlOutput("total")
   ),
 
   shiny::mainPanel(
@@ -83,7 +86,16 @@ server <- function(input, output, session) {
     
     })
   
+  calcTotal <- shiny::reactive({
+  
+      groupedInventoryData <- inventoryData %>%
+        dplyr::filter(year == input$selectedYear) %>%
+        dplyr::summarise(emissionTotal = sum(emissions), .groups = "drop_last")
+        
+  })
+  
   output$treemap <- plotly::renderPlotly(producePlot())
+  output$total <- shiny::renderText(shiny::HTML(paste0("<b>","Total emissions: ","</b>", round(calcTotal(),2))))
   
 }
 
