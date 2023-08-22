@@ -1,10 +1,11 @@
-#Improvements:
-#Higher level categories? i.e. all the 1's from IPCC?
-#Get rid of unnecessary categories i.e. if all of subcategory is one gas
-#Make labels clearer, i.e. simplify colons and codes
-#Tickboxes to allow selecting multiple years
-#Check are units consistent across dataset? units column suggests otherwise
-#Include source name col
+#'Improvements:
+#'Make labels clearer, i.e. simplify appended colons names and codes - https://naei.beis.gov.uk/glossary?view=crf
+#'Tickboxes to allow selecting multiple years - plus historical visualisations
+#'Check are units consistent across dataset? units column suggests otherwise
+#'Different data cuts i.e. by gas at top level
+#'Include source name col
+#'currently just remove negative emissions, could plot these in a second plot?
+#'Get rid of unnecessary categories i.e. if all of subcategory is one gas(?)
 
 library(magrittr)
 
@@ -24,7 +25,7 @@ inventoryData <- raw_inventoryData[,1:12] %>%
                 x2020 = x2020_11,
                 x2021 = x2021_12) %>%
   dplyr::filter(!is.na(sourceName)) %>%
-  dplyr::mutate(dplyr::across(x2017:x2021, ~tidyr::replace_na(.x, 0))) %>% #replace NAs with zero
+  dplyr::mutate(dplyr::across(x2017:x2021, ~tidyr::replace_na(.x, 0))) %>% #replace NAs with zero - needs checking this is right
   tidyr::pivot_longer(x2017:x2021, names_to = "year", values_to = "emissions") %>%
   dplyr::mutate(year = as.numeric(gsub("x","", year))) %>%
   dplyr::mutate(sector = substr(ippcId, 1, 1), .before = ippcId) %>%
