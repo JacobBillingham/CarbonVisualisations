@@ -3,6 +3,8 @@
 #Get rid of unnecessary categories i.e. if all of subcategory is one gas
 #Make labels clearer, i.e. simplify colons and codes
 #Tickboxes to allow selecting multiple years
+#Check are units consistent across dataset? units column suggests otherwise
+#Include source name col
 
 library(magrittr)
 
