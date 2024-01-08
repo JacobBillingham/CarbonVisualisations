@@ -1,10 +1,8 @@
 #'TO DO:
+#'Add filter for gas and/or fuel type
 #'Tickboxes to allow selecting multiple years - plus historical visualisations
 #'Currently I just remove negative emissions, could plot these in a second plot?
-#'Add filter for gas and/or fuel type
-#'
-#'Check are units consistent across dataset? units column suggests otherwise
-
+#' implement as circles using anne's package
 
 #'DONE:
 #'Make labels clearer, i.e. simplify appended colons and translate IPPC codes (using https://naei.beis.gov.uk/glossary?view=crf)
@@ -12,7 +10,7 @@
 #import the magrittr package to allow use of pipes (%>%)
 library(magrittr)
 
-#import the emissions data, skipping 6 rows at the top of the spreadsheet
+#import the emissions data, skipping 6 rows at the top of the spreadsheet and specifying the data type
 raw_inventoryData <-
   readxl::read_excel(
     "National Inventory Mapping 2021.xlsx",
@@ -51,18 +49,18 @@ raw_inventoryData <-
     )
   )
 
-#tidy up the emissions data
+#tidy up the raw data
 inventoryData <- raw_inventoryData %>%
   janitor::clean_names() %>% #standardise the names of the columns
   dplyr::filter(!is.na(sector)) %>% #filter out totals rows at bottom of spreadsheet
-  dplyr::select(level_1:level_9, fuel = activity_name, greenhouse_gas = short_poll_name, x2017:x2021) %>% 
+  dplyr::select(level_1:level_9, fuel = activity_name, greenhouse_gas = short_poll_name, x2017:x2021) %>% #select and rename columns
   dplyr::group_by(across(level_1:greenhouse_gas)) %>%
-  dplyr::summarise(dplyr::across(x2017:x2021, ~ sum(.x, na.rm = TRUE))) %>%
+  dplyr::summarise(dplyr::across(x2017:x2021, ~ sum(.x, na.rm = TRUE))) %>% #sum any identical rows
   tidyr::pivot_longer(x2017:x2021, names_to = "year", values_to = "emissions") %>% #pivot the spreadsheet to long format i.e. a row for each source in each year
   dplyr::mutate(year = as.numeric(gsub("x","", year))) %>% #remove the x in front of years as now row entries rather than column names
   dplyr::ungroup()
 
-#sort naughty NAs
+#sort naughty NAs in between categories - replace them with the a category called "Other [category below]"
 fixed_inventoryData <- inventoryData %>%
   dplyr::mutate(level_7 = dplyr::case_when(
     is.na(level_7) & !is.na(level_8) ~ paste0("Other ", level_8),
@@ -81,6 +79,8 @@ fixed_inventoryData <- inventoryData %>%
     .default = level_4
   ))
 
+#'sort naughty repeated categories e.g. 'boar' flows into both 'pigs' and 'sheep'
+#'use the category above in brackets after e.g. Boar (Pigs) and Boar (Sheep)
 all_categories <- fixed_inventoryData %>%
   dplyr::select(level_1:level_9) %>%
   dplyr::mutate(level_0_1 = paste0("", ":", level_1)) %>%
@@ -141,8 +141,7 @@ fixed_inventoryData_2 <- fixed_inventoryData %>%
   )) %>%
   dplyr::filter(emissions >= 0) #remove negative emissions as treemap cant deal with these, in future could plot these in a second plot?
   
-#'the tree map needs each box to have a unique name, so I append the different levels to achieve this 
-#'e.g. all the different CO2 observations become IPPC:activity:CO2 (and ippc and activity are unique)
+#converting the data to parent-child pairs
 layered_inventoryData <- fixed_inventoryData_2 %>%
   dplyr::mutate(level_0_1 = paste0("", ":", level_1)) %>%
   dplyr::mutate(level_1_2 = paste0(level_1, ":", level_2)) %>%
@@ -153,10 +152,10 @@ layered_inventoryData <- fixed_inventoryData_2 %>%
   dplyr::mutate(level_6_7 = paste0(level_6, ":", level_7)) %>%
   dplyr::mutate(level_7_8 = paste0(level_7, ":", level_8)) %>%
   dplyr::mutate(level_8_9 = paste0(level_8, ":", level_9)) %>%
-  dplyr::select(level_0_1:level_8_9, year, emissions) %>%
+  dplyr::select(level_0_1:level_8_9, greenhouse_gas, year, emissions) %>%
   tidyr::pivot_longer(level_0_1:level_8_9, names_to = "col_names", values_to = "levels") %>%
   dplyr::select(-col_names) %>%
-  dplyr::group_by(year,levels) %>%
+  dplyr::group_by(year,levels,greenhouse_gas) %>%
   dplyr::summarise(emissions = sum(emissions)) %>%
   dplyr::ungroup() %>%
   dplyr::filter(!grepl(":NA$", levels))
@@ -165,10 +164,11 @@ split_cols <- stringr::str_split_fixed(layered_inventoryData$levels, ':', 2)
  
 parent_child_inventoryData <- layered_inventoryData %>%
   cbind(split_cols) %>%
-  dplyr::select(parent = "1", child = "2", emissions, year)
+  dplyr::select(parent = "1", child = "2", greenhouse_gas, emissions, year)
 
-#get the years of data available for user to select from 
-years <- unique(parent_child_inventoryData$year)
+#get the years and gases of data available for user to select from 
+years <- unique(parent_child_inventoryData$year) 
+gases <- unique(parent_child_inventoryData$greenhouse_gas)
 
 #create user interface for R shiny
 ui <- shiny::fluidPage(
@@ -178,12 +178,20 @@ ui <- shiny::fluidPage(
 
   shiny::sidebarPanel(
     
-    #allow user to select a year, default set to 2021
+    #allow user to select a year, default set to most recent year
     shiny::selectInput(
       "selectedYear",
       "Choose year:",
       selected = max(years),
       years),
+    
+    #allow user to select a gas, default set to most CO2
+    shiny::selectInput(
+      "selectedGas",
+      "Choose gases:",
+      selected = gases,
+      multiple = TRUE,
+      gases),
     
     #display the total emissions for that year
     shiny::htmlOutput("total")
@@ -201,9 +209,11 @@ server <- function(input, output, session) {
   
   #define a function for creating treemap
   producePlot <- shiny::reactive({
-  
+    
     plotData <- parent_child_inventoryData %>%
-      dplyr::filter(year == input$selectedYear) %>%
+      dplyr::filter(year == input$selectedYear & greenhouse_gas %in% input$selectedGas) %>%
+      dplyr::group_by(parent, child) %>%
+      dplyr::summarise(emissions = sum(emissions)) %>%
       dplyr::mutate(color = dplyr::case_when(child == "Energy" ~ "red",
                                              child == "Industrial Processes" ~ "yellow",
                                              child == "Agriculture" ~ "green",
@@ -228,6 +238,7 @@ server <- function(input, output, session) {
 
     inventoryData %>%
       dplyr::filter(year == input$selectedYear) %>%
+      dplyr::filter(greenhouse_gas %in% input$selectedGas) %>%
       dplyr::summarise(emissionTotal = sum(emissions), .groups = "drop_last") #sum
 
   })
