@@ -183,15 +183,14 @@ ui <- shiny::fluidPage(
       "selectedYear",
       "Choose year:",
       selected = max(years),
-      years),
+      choices = years),
     
     #allow user to select a gas, default set to most CO2
-    shiny::selectInput(
+    shiny::checkboxGroupInput(
       "selectedGas",
       "Choose gases:",
       selected = gases,
-      multiple = TRUE,
-      gases),
+      choices = gases),
     
     #display the total emissions for that year
     shiny::htmlOutput("total")
