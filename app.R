@@ -227,8 +227,11 @@ server <- function(input, output, session) {
       values= plotData$emissions, #specify values
       branchvalues = "total", #specify summing method (values for higher level categories are not in addition to categories below)
       height=800,
-      marker=list(colors=plotData$color) #specify group colours
-    )
+      marker=list(colors=plotData$color), #specify group colours
+      #textinfo = "label+text+value"
+      texttemplate = '%{value:.2f} MtCO2eq',
+      hovertemplate = '%{value:.2f} MtCO2eq<extra></extra>'
+      )
     
   })
   
@@ -244,7 +247,7 @@ server <- function(input, output, session) {
 
   #send ouputs to shiny app
   output$treemap <- plotly::renderPlotly(producePlot())
-  output$total <- shiny::renderText(shiny::HTML(paste0("<b>","Total emissions: ","</b>", round(calcTotal(),2)))) #do a bit of formatting on the total emissions to make it look nice
+  output$total <- shiny::renderText(shiny::HTML(paste0("<b>","Total emissions: ","</b>", round(calcTotal(),2), " MtCO2eq"))) #do a bit of formatting on the total emissions to make it look nice
   
 }
 
