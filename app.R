@@ -291,8 +291,8 @@ server <- function(input, output, session) {
       height = 800,
       marker = list(colors = plot_data$color),
       # specify group colours
-      texttemplate = "%{value:.2f} MtCO2eq",
-      hovertemplate = "%{value:.2f} MtCO2eq<extra></extra>"
+      texttemplate = "%{label} %{value:.2f} MtCO2eq",
+      hovertemplate = "%{label} %{value:.2f} MtCO2eq<extra></extra>"
     )
   })
 
