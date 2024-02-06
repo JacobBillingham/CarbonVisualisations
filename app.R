@@ -3,6 +3,7 @@
 #' Currently just remove negative emissions, could plot these in a second plot
 #' implement as circles using anne's package
 #' Add filter for fuel type
+#' Improve code quality - lots of inefficiency and repeated code
 
 #' DONE:
 #' Make labels clearer, i.e. simplify appended colons and translate IPPC
@@ -10,8 +11,12 @@
 #' Add filter for gas
 #' historical visualisations
 
+# Set up ------------------------------------------------------------------
+
 # import the magrittr package to allow use of pipes (%>%)
 library(magrittr)
+
+# Data import  ------------------------------------------------------------
 
 #' import the emissions data, skipping 6 rows at the top of the spreadsheet and
 #' specifying the data type
@@ -53,6 +58,9 @@ raw_inventory_data <-
     )
   )
 
+
+# Data cleaning -----------------------------------------------------------
+
 # tidy up the raw data
 inventory_data <- raw_inventory_data %>%
   janitor::clean_names() %>% # standardise the names of the columns
@@ -76,7 +84,7 @@ inventory_data <- raw_inventory_data %>%
   dplyr::ungroup()
 
 #' sort naughty NAs in between categories - replace them with the a category
-#' called "Other [category below]"
+#' called "Other <category below>"
 fixed_inventory_data <- inventory_data %>%
   dplyr::mutate(level_7 = dplyr::case_when(
     is.na(level_7) & !is.na(level_8) ~ paste0("Other ", level_8),
@@ -95,9 +103,7 @@ fixed_inventory_data <- inventory_data %>%
     .default = level_4
   ))
 
-#' sort naughty repeated categories e.g. 'boar' flows into both 'pigs' and
-#' 'sheep' use the category above in brackets after e.g. Boar (Pigs) and
-#' Boar (Sheep)
+# pivot dataset to long format so we have a row for each category
 all_categories <- fixed_inventory_data %>%
   dplyr::select(level_1:level_9) %>%
   dplyr::mutate(level_0_1 = paste0("", ":", level_1)) %>%
@@ -118,15 +124,20 @@ all_categories <- fixed_inventory_data %>%
   dplyr::filter(label != "NA") %>%
   unique()
 
+# find labels that are used more than once in different areas of the inventory
 duplicated_categories <- all_categories %>%
   dplyr::group_by(label) %>%
   dplyr::mutate(category_count = dplyr::n()) %>%
   dplyr::filter(category_count > 1) %>%
   dplyr::select(level, category = label) %>%
   dplyr::mutate(level = paste0("level", sub("level\\_\\d", "", level))) %>%
+  # get the actual level the duplicate is at
   unique()
 
-#' bet theres a better way to do this where you need only one mutate and it
+#' sort naughty repeated categories e.g. 'boar' flows into both 'pigs' and
+#' 'sheep' use the category above in brackets after e.g. Boar (Pigs) and
+#' Boar (Sheep)
+#' bet there's a better way to do this where you need only one mutate and it
 #' just goes over the columns
 fixed_inventory_data_2 <- fixed_inventory_data %>%
   dplyr::mutate(level_2 = dplyr::case_when(
@@ -189,7 +200,11 @@ fixed_inventory_data_2 <- fixed_inventory_data %>%
 #' remove negative emissions as treemap cant deal with these, in future could
 #' plot these in a second plot?
 
-# converting the data to parent-child pairs
+
+# Reshape data for plotting -----------------------------------------------
+
+#' pivot dataset to long format so we have a row for each category and sum any
+#' identical rows
 layered_inventory_data <- fixed_inventory_data_2 %>%
   dplyr::mutate(level_0_1 = paste0("", ":", level_1)) %>%
   dplyr::mutate(level_1_2 = paste0(level_1, ":", level_2)) %>%
@@ -211,9 +226,11 @@ layered_inventory_data <- fixed_inventory_data_2 %>%
   dplyr::ungroup() %>%
   dplyr::filter(!grepl(":NA$", levels))
 
+# split levels into parent-child pairs
 split_cols <-
   stringr::str_split_fixed(layered_inventory_data$levels, ":", 2)
 
+# formatting for plotting
 parent_child_inventory_data <- layered_inventory_data %>%
   cbind(split_cols) %>%
   dplyr::select(
@@ -224,15 +241,22 @@ parent_child_inventory_data <- layered_inventory_data %>%
     year
   )
 
+# Get data for line graphs ------------------------------------------------
+
 # get data for historic plot
 historic_data <- inventory_data %>%
   dplyr::group_by(level_1, year, greenhouse_gas) %>%
   dplyr::summarise(emissions = sum(emissions))
 
+# Get options for Shiny selects -----------------------------------------
+
 # get the years, sectors and gases of data available for user to select from
 years <- unique(parent_child_inventory_data$year)
 gases <- unique(parent_child_inventory_data$greenhouse_gas)
 sectors <- unique(inventory_data$level_1)
+
+
+# R Shiny design ----------------------------------------------------------
 
 # create user interface for R shiny
 ui <- shiny::fluidPage(
@@ -304,6 +328,8 @@ ui <- shiny::fluidPage(
     )
   )
 )
+
+# R Shiny calculations ----------------------------------------------------
 
 # define the code that will create the app
 server <- function(input, output, session) {
@@ -399,6 +425,8 @@ server <- function(input, output, session) {
     ))) # do a bit of formatting on the total emissions to make it look nice
   output$historic <- plotly::renderPlotly(produce_historic_plot())
 }
+
+# Run R Shiny app ---------------------------------------------------------
 
 # run the app
 shiny::shinyApp(ui, server)
