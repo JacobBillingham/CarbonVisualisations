@@ -1,12 +1,14 @@
 #' TO DO:
-#' Add filter for gas and/or fuel type
-#' Tickboxes to allow selecting multiple years - plus historical visualisations
+#' Tickboxes to allow selecting multiple years
 #' Currently just remove negative emissions, could plot these in a second plot
 #' implement as circles using anne's package
+#' Add filter for fuel type
 
 #' DONE:
 #' Make labels clearer, i.e. simplify appended colons and translate IPPC
 #' codes (using https://naei.beis.gov.uk/glossary?view=crf)
+#' Add filter for gas
+#' historical visualisations
 
 # import the magrittr package to allow use of pipes (%>%)
 library(magrittr)
@@ -222,9 +224,15 @@ parent_child_inventory_data <- layered_inventory_data %>%
     year
   )
 
-# get the years and gases of data available for user to select from
+# get data for historic plot
+historic_data <- inventory_data %>%
+  dplyr::group_by(level_1, year, greenhouse_gas) %>%
+  dplyr::summarise(emissions = sum(emissions))
+
+# get the years, sectors and gases of data available for user to select from
 years <- unique(parent_child_inventory_data$year)
 gases <- unique(parent_child_inventory_data$greenhouse_gas)
+sectors <- unique(inventory_data$level_1)
 
 # create user interface for R shiny
 ui <- shiny::fluidPage(
@@ -232,28 +240,68 @@ ui <- shiny::fluidPage(
   shiny::titlePanel("Net Zero Inventory Mapping",
     windowTitle = "Net Zero Inventory Mapping"
   ),
-  shiny::sidebarPanel(
-    # allow user to select a year, default set to most recent year
-    shiny::selectInput(
-      "selectedYear",
-      "Choose year:",
-      selected = max(years),
-      choices = years
-    ),
+  shiny::tabsetPanel(
+    shiny::tabPanel(
+      "Annual Sources",
+      shiny::br(),
 
-    # allow user to select a gas, default set to most CO2
-    shiny::checkboxGroupInput(
-      "selectedGas",
-      "Choose gases:",
-      selected = gases,
-      choices = gases
-    ),
+      shiny::sidebarPanel(
+        # allow user to select a year, default set to most recent year
+        shiny::selectInput(
+          "selectedYear",
+          "Choose year:",
+          selected = max(years),
+          choices = years
+        ),
 
-    # display the total emissions for that year
-    shiny::htmlOutput("total")
-  ),
-  shiny::mainPanel( # display the treemap
-    plotly::plotlyOutput("treemap")
+        # allow user to select a gas, default set to all
+        shiny::checkboxGroupInput(
+          "selectedGas",
+          "Choose gases:",
+          selected = gases,
+          choices = gases
+        ),
+
+        # display the total emissions for that year
+        shiny::htmlOutput("total")
+      ),
+      shiny::mainPanel( # display the treemap
+        plotly::plotlyOutput("treemap")
+      )
+    ),
+    shiny::tabPanel(
+      "Historic Totals",
+      shiny::br(),
+
+      shiny::sidebarPanel(
+        # allow user to select sectors, default set to all
+        shiny::checkboxGroupInput(
+          "selectedSectorsHistoric",
+          "Choose sectors:",
+          selected = sectors,
+          choices = sectors
+        ),
+
+        # allow user to select which years to graph, default set to all
+        shiny::checkboxGroupInput(
+          "selectedYearsHistoric",
+          "Choose years:",
+          selected = years,
+          choices = years
+        ),
+
+        # allow user to select gases, default set to all
+        shiny::checkboxGroupInput(
+          "selectedGasHistoric",
+          "Choose gases:",
+          selected = gases,
+          choices = gases
+        )
+      ),
+      shiny::mainPanel( # display the historic plot
+        plotly::plotlyOutput("historic")
+      )
+    )
   )
 )
 
@@ -307,6 +355,38 @@ server <- function(input, output, session) {
       ) # sum
   })
 
+  # define a function for creating historic plot
+  produce_historic_plot <- shiny::reactive({
+    # filter to chosen data
+    historic_data %<>%
+      dplyr::filter(
+        year %in% input$selectedYearsHistoric &
+          greenhouse_gas %in% input$selectedGasHistoric &
+          level_1 %in% input$selectedSectorsHistoric
+      ) %>%
+      dplyr::group_by(level_1, year) %>%
+      dplyr::summarise(emissions = sum(emissions))
+
+    # create historic graph
+    plotly::plot_ly(
+      historic_data,
+      # define x and y axes and colours of lines
+      x = ~year,
+      y = ~emissions,
+      color = ~level_1,
+      # specify graph type
+      type = "scatter",
+      mode = "lines+markers",
+      # format data point labels and axis titles
+      hoverinfo = "text+name",
+      text = ~ paste(round(emissions, 2), "MtCO2eq")
+    ) %>%
+      plotly::layout(
+        yaxis = list(title = "Emissions (MtCO2eq)"),
+        xaxis = list(title = "Year", dtick = 1)
+      )
+  })
+
   # send ouputs to shiny app
   output$treemap <- plotly::renderPlotly(produce_plot())
   output$total <-
@@ -317,6 +397,7 @@ server <- function(input, output, session) {
       round(calc_total(), 2),
       " MtCO2eq"
     ))) # do a bit of formatting on the total emissions to make it look nice
+  output$historic <- plotly::renderPlotly(produce_historic_plot())
 }
 
 # run the app
