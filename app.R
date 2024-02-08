@@ -195,17 +195,22 @@ fixed_inventory_data_2 <- fixed_inventory_data %>%
       category
     ) ~ paste0(level_9, " (", level_8, ")"),
     .default = level_9
-  )) %>%
+  ))
+
+fixed_inventory_data_3 <- fixed_inventory_data_2 %>%
   dplyr::filter(emissions >= 0)
 #' remove negative emissions as treemap cant deal with these, in future could
 #' plot these in a second plot?
+
+fixed_inventory_data_negative <- fixed_inventory_data_2 %>%
+  dplyr::filter(emissions < 0)
 
 
 # Reshape data for plotting -----------------------------------------------
 
 #' pivot dataset to long format so we have a row for each category and sum any
 #' identical rows
-layered_inventory_data <- fixed_inventory_data_2 %>%
+layered_inventory_data <- fixed_inventory_data_3 %>%
   dplyr::mutate(level_0_1 = paste0("", ":", level_1)) %>%
   dplyr::mutate(level_1_2 = paste0(level_1, ":", level_2)) %>%
   dplyr::mutate(level_2_3 = paste0(level_2, ":", level_3)) %>%
@@ -232,6 +237,43 @@ split_cols <-
 
 # formatting for plotting
 parent_child_inventory_data <- layered_inventory_data %>%
+  cbind(split_cols) %>%
+  dplyr::select(
+    parent = "1",
+    child = "2",
+    greenhouse_gas,
+    emissions,
+    year
+  )
+
+# bad repeated code for negative emissions --------------------------------
+
+layered_inventory_data_negative <- fixed_inventory_data_negative %>%
+  dplyr::mutate(level_0_1 = paste0("", ":", level_1)) %>%
+  dplyr::mutate(level_1_2 = paste0(level_1, ":", level_2)) %>%
+  dplyr::mutate(level_2_3 = paste0(level_2, ":", level_3)) %>%
+  dplyr::mutate(level_3_4 = paste0(level_3, ":", level_4)) %>%
+  dplyr::mutate(level_4_5 = paste0(level_4, ":", level_5)) %>%
+  dplyr::mutate(level_5_6 = paste0(level_5, ":", level_6)) %>%
+  dplyr::mutate(level_6_7 = paste0(level_6, ":", level_7)) %>%
+  dplyr::mutate(level_7_8 = paste0(level_7, ":", level_8)) %>%
+  dplyr::mutate(level_8_9 = paste0(level_8, ":", level_9)) %>%
+  dplyr::select(level_0_1:level_8_9, greenhouse_gas, year, emissions) %>%
+  tidyr::pivot_longer(level_0_1:level_8_9,
+    names_to = "col_names",
+    values_to = "levels"
+  ) %>%
+  dplyr::select(-col_names) %>%
+  dplyr::group_by(year, levels, greenhouse_gas) %>%
+  dplyr::summarise(emissions = sum(emissions)) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(!grepl(":NA$", levels))
+
+split_cols <-
+  stringr::str_split_fixed(layered_inventory_data_negative$levels, ":", 2)
+
+parent_child_inventory_data_negative <-
+  layered_inventory_data_negative %>%
   cbind(split_cols) %>%
   dplyr::select(
     parent = "1",
@@ -268,7 +310,6 @@ ui <- shiny::fluidPage(
     shiny::tabPanel(
       "Annual Sources",
       shiny::br(),
-
       shiny::sidebarPanel(
         # allow user to select a year, default set to most recent year
         shiny::selectInput(
@@ -296,7 +337,6 @@ ui <- shiny::fluidPage(
     shiny::tabPanel(
       "Historic Totals",
       shiny::br(),
-
       shiny::sidebarPanel(
         # allow user to select sectors, default set to all
         shiny::checkboxGroupInput(
@@ -325,9 +365,16 @@ ui <- shiny::fluidPage(
       shiny::mainPanel( # display the historic plot
         plotly::plotlyOutput("historic")
       )
+    ),
+    shiny::tabPanel(
+      "Negative Emissions",
+      shiny::br(),
+      shiny::helpText("Note: Not to scale with with annual sources plot."),
+      plotly::plotlyOutput("negative_treemap")
     )
   )
 )
+
 
 # R Shiny calculations ----------------------------------------------------
 
@@ -337,7 +384,7 @@ server <- function(input, output, session) {
   produce_plot <- shiny::reactive({
     plot_data <- parent_child_inventory_data %>%
       dplyr::filter(year == input$selectedYear &
-                      greenhouse_gas %in% input$selectedGas) %>%
+        greenhouse_gas %in% input$selectedGas) %>%
       dplyr::group_by(parent, child) %>%
       dplyr::summarise(emissions = sum(emissions)) %>%
       dplyr::mutate(
@@ -369,6 +416,45 @@ server <- function(input, output, session) {
       hovertemplate = "%{label} %{value:.2f} MtCO2eq<extra></extra>"
     )
   })
+
+  #' need to work out how best to do this as how should I make the negative
+  #' emissions the right scale when compared to positive - could just report a
+  #' summary in a table
+  produce_plot_negative <- shiny::reactive({
+    plot_data_negative <- parent_child_inventory_data_negative %>%
+      dplyr::filter(year == input$selectedYear &
+        greenhouse_gas %in% input$selectedGas) %>%
+      dplyr::group_by(parent, child) %>%
+      dplyr::summarise(emissions = -sum(emissions)) %>%
+      dplyr::mutate(
+        color = dplyr::case_when(
+          child == "Energy" ~ "red",
+          child == "Industrial Processes" ~ "yellow",
+          child == "Agriculture" ~ "green",
+          child == "LULUCF" ~ "blue",
+          child == "Waste" ~ "purple"
+        )
+      ) # code a colour for each sector
+
+    # create treemap
+    plotly::plot_ly(
+      type = "treemap",
+      labels = plot_data_negative$child,
+      # specify categories
+      parents = plot_data_negative$parent,
+      # specify parents
+      values = plot_data_negative$emissions,
+      # specify values
+      branchvalues = "total",
+      #' specify summing method (values for higher level categories are not in
+      #' addition to categories below)
+      marker = list(colors = plot_data_negative$color),
+      # specify group colours
+      texttemplate = "%{label} %{value:.2f} MtCO2eq",
+      hovertemplate = "%{label} %{value:.2f} MtCO2eq<extra></extra>"
+    )
+  })
+
 
   # define function for calculating total
   calc_total <- shiny::reactive({
@@ -424,6 +510,7 @@ server <- function(input, output, session) {
       " MtCO2eq"
     ))) # do a bit of formatting on the total emissions to make it look nice
   output$historic <- plotly::renderPlotly(produce_historic_plot())
+  output$negative_treemap <- plotly::renderPlotly(produce_plot_negative())
 }
 
 # Run R Shiny app ---------------------------------------------------------
